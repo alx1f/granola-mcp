@@ -2,6 +2,30 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+const RETRY_TIMEOUT_MS = 60_000;
+const RETRY_INTERVAL_MS = 2_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUntilReady<T>(
+  getData: () => Promise<T>,
+  isEmpty: (data: T) => boolean
+): Promise<T> {
+  const startTime = Date.now();
+
+  while (true) {
+    const data = await getData();
+
+    if (!isEmpty(data) || Date.now() - startTime >= RETRY_TIMEOUT_MS) {
+      return data;
+    }
+
+    await sleep(RETRY_INTERVAL_MS);
+  }
+}
+
 const CACHE_PATH = join(
   homedir(),
   "Library",
@@ -68,12 +92,14 @@ export async function listNotes(options: ListNotesOptions = {}): Promise<NoteSum
   const { limit = 50, offset = 0, start_date, end_date } = options;
   const state = await loadState();
 
-  let docs = Object.values(state.documents)
-    .filter((d) => !d.deleted_at)
+  const docs = Object.values(state.documents)
+    .filter((d) => {
+      if (d.deleted_at) return false;
+      if (start_date && d.created_at < start_date) return false;
+      if (end_date && d.created_at > end_date) return false;
+      return true;
+    })
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-
-  if (start_date) docs = docs.filter((d) => d.created_at >= start_date);
-  if (end_date) docs = docs.filter((d) => d.created_at <= end_date);
 
   return docs.slice(offset, offset + limit).map((d) => ({
     id: d.id,
@@ -83,28 +109,37 @@ export async function listNotes(options: ListNotesOptions = {}): Promise<NoteSum
 }
 
 export async function getNote(id: string): Promise<Note> {
-  const state = await loadState();
-  const doc = state.documents[id];
-  if (!doc) throw new Error(`Document not found: ${id}`);
-
-  return {
-    id: doc.id,
-    title: getTitle(doc),
-    summary: doc.notes_plain || "",
-    created_at: doc.created_at,
-  };
+  return pollUntilReady(
+    async () => {
+      const state = await loadState();
+      const doc = state.documents[id];
+      if (!doc) throw new Error(`Document not found: ${id}`);
+      return {
+        id: doc.id,
+        title: getTitle(doc),
+        summary: doc.notes_plain || "",
+        created_at: doc.created_at,
+      };
+    },
+    (note) => note.summary === ""
+  );
 }
 
 export async function getTranscript(id: string): Promise<Transcript> {
-  const state = await loadState();
-  const doc = state.documents[id];
-  if (!doc) throw new Error(`Document not found: ${id}`);
+  return pollUntilReady(
+    async () => {
+      const state = await loadState();
+      const doc = state.documents[id];
+      if (!doc) throw new Error(`Document not found: ${id}`);
 
-  const entries = state.transcripts[id] || [];
-  const transcript = [...entries]
-    .sort((a, b) => Date.parse(a.start_timestamp) - Date.parse(b.start_timestamp))
-    .map((e) => e.text)
-    .join("\n");
+      const entries = state.transcripts[id] || [];
+      const transcript = [...entries]
+        .sort((a, b) => Date.parse(a.start_timestamp) - Date.parse(b.start_timestamp))
+        .map((e) => e.text)
+        .join("\n");
 
-  return { id, transcript };
+      return { id, transcript };
+    },
+    (result) => result.transcript === ""
+  );
 }

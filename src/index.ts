@@ -5,6 +5,20 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as cache from "./cache.js";
 
+type ToolResponse = {
+  [key: string]: unknown;
+  content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
+};
+
+function jsonResponse(data: unknown): ToolResponse {
+  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+}
+
+function errorResponse(error: unknown): ToolResponse {
+  return { content: [{ type: "text", text: String(error) }], isError: true };
+}
+
 const server = new McpServer({
   name: "granola-mcp",
   version: "1.0.0",
@@ -22,9 +36,7 @@ server.registerTool(
       end_date: z.string().optional().describe("ISO date, include notes until this date"),
     },
   },
-  async (args) => ({
-    content: [{ type: "text", text: JSON.stringify(await cache.listNotes(args), null, 2) }],
-  })
+  async (args) => jsonResponse(await cache.listNotes(args))
 );
 
 server.registerTool(
@@ -36,13 +48,7 @@ server.registerTool(
       id: z.string().describe("Document UUID"),
     },
   },
-  async ({ id }) => {
-    try {
-      return { content: [{ type: "text", text: JSON.stringify(await cache.getNote(id), null, 2) }] };
-    } catch (e) {
-      return { content: [{ type: "text", text: String(e) }], isError: true };
-    }
-  }
+  async ({ id }) => cache.getNote(id).then(jsonResponse).catch(errorResponse)
 );
 
 server.registerTool(
@@ -54,13 +60,7 @@ server.registerTool(
       id: z.string().describe("Document UUID"),
     },
   },
-  async ({ id }) => {
-    try {
-      return { content: [{ type: "text", text: JSON.stringify(await cache.getTranscript(id), null, 2) }] };
-    } catch (e) {
-      return { content: [{ type: "text", text: String(e) }], isError: true };
-    }
-  }
+  async ({ id }) => cache.getTranscript(id).then(jsonResponse).catch(errorResponse)
 );
 
 const transport = new StdioServerTransport();
