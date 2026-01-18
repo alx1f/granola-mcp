@@ -92,11 +92,17 @@ export async function listNotes(options: ListNotesOptions = {}): Promise<NoteSum
   const { limit = 50, offset = 0, start_date, end_date } = options;
   const state = await loadState();
 
+  const startTs = start_date ? Date.parse(start_date) : null;
+  const endTs = end_date
+    ? Date.parse(end_date.includes('T') ? end_date : end_date + 'T23:59:59.999Z')
+    : null;
+
   const docs = Object.values(state.documents)
     .filter((d) => {
       if (d.deleted_at) return false;
-      if (start_date && d.created_at < start_date) return false;
-      if (end_date && d.created_at > end_date) return false;
+      const ts = Date.parse(d.created_at);
+      if (startTs && ts < startTs) return false;
+      if (endTs && ts > endTs) return false;
       return true;
     })
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));

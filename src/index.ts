@@ -32,8 +32,8 @@ server.registerTool(
     inputSchema: {
       limit: z.number().int().positive().default(50).describe("Max results"),
       offset: z.number().int().min(0).default(0).describe("Skip first N results"),
-      start_date: z.string().optional().describe("ISO date, include notes from this date"),
-      end_date: z.string().optional().describe("ISO date, include notes until this date"),
+      start_date: z.string().optional().describe("ISO date (inclusive), include notes from this date"),
+      end_date: z.string().optional().describe("ISO date (inclusive), include notes until this date"),
     },
   },
   async (args) => jsonResponse(await cache.listNotes(args))
